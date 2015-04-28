@@ -34,3 +34,4 @@ build/
 OBJ/
 lib/
 bin/
+fitter-ipopt.log

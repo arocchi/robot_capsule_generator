@@ -61,7 +61,7 @@ int main(int argc, char** argv)
             // Compute best fitting capsule.
             fitter_cube.computeBestFitCapsule (initParam);
             argument_t solutionParam = fitter_cube.solutionParam ();
-            std::cout << fitter_cube << std::endl;
+            std::cout << solutionParam << std::endl;
         }
     }
 
