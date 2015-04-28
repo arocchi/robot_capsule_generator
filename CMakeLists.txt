@@ -18,18 +18,18 @@ endif(CMAKE_BUILD_TYPE STREQUAL "Debug")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/")
 
-
+FIND_PACKAGE(Eigen3 REQUIRED)
 FIND_PACKAGE(urdf REQUIRED)
 FIND_PACKAGE(srdfdom REQUIRED)
 FIND_PACKAGE(moveit_core REQUIRED)
-pkg_check_modules(robotim_capsule roboptim-capsule)
-if(NOT robotim_capsule_FOUND)
+pkg_check_modules(roboptim_capsule roboptim-capsule)
+if(NOT roboptim_capsule_FOUND)
     message( FATAL_ERROR "roboptim-capsule not found. Aborting")
 endif()
 
 # add include directories
-INCLUDE_DIRECTORIES(include ${roboptim_capsule_INCLUDE_DIRS})
-LINK_DIRECTORIES(${robotim_capsule_LIBRARY_DIRS})
+INCLUDE_DIRECTORIES(include ${roboptim_capsule_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR})
+LINK_DIRECTORIES(${roboptim_capsule_LIBRARY_DIRS})
 
 # Find package qpOASES or build it using ExternalProject
 find_package(trimesh2 QUIET)
@@ -44,7 +44,7 @@ if(NOT trimesh2_FOUND)
                                     INSTALL_COMMAND "")
     link_directories("${trimesh2_BINARY_DIR}/lib/")
     set(trimesh2_INCLUDE_DIRS "${trimesh2_SOURCE_DIR}/include")
-    set(trimesh2_LIBRARIES trimesh)
+    set(trimesh2_LIBRARIES trimesh gomp)
     add_custom_target(copy_trimesh2_to_build ALL 
                     ${CMAKE_COMMAND} -E copy_directory ${trimesh2_SOURCE_DIR} ${trimesh2_BINARY_DIR})
     add_dependencies(trimesh2-ext copy_trimesh2_to_build)
@@ -67,8 +67,8 @@ endif()
 
 
 # we now add the YARP and iCub libraries to our project.
-TARGET_LINK_LIBRARIES(robot_capsule_generator #PUBLIC  
-                                               PRIVATE ${trimesh2_LIBRARIES} ${roboptim_capsule_LIBRARIES})
+TARGET_LINK_LIBRARIES(robot_capsule_generator  PUBLIC  ${roboptim_capsule_LIBRARIES}
+                                               PRIVATE ${trimesh2_LIBRARIES})
 
 
 
