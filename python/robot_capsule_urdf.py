@@ -136,8 +136,6 @@ class CapsuleGenerator(object):
 
     def __compute_params(self):
         if self._link.collision.geometry.scale:
-            p = subprocess.Popen(["robot_capsule_generator",self.mesh_path], stdout=subprocess.PIPE)
-        else:
             scale = self._link.collision.geometry.scale
             p = subprocess.Popen(["robot_capsule_generator",
                                   self.mesh_path,
@@ -145,6 +143,9 @@ class CapsuleGenerator(object):
                                   str(scale[0]),
                                   str(scale[1]),
                                   str(scale[2])],stdout=subprocess.PIPE)
+        else:
+            p = subprocess.Popen(["robot_capsule_generator",self.mesh_path], stdout=subprocess.PIPE)
+            
         stdout,stderr = p.communicate()
         params = stdout.rstrip()
 
