@@ -141,10 +141,10 @@ class CapsuleGenerator(object):
             scale = self._link.collision.geometry.scale
             p = subprocess.Popen(["robot_capsule_generator",
                                   self.mesh_path,
-                                  "--scale",
-                                  scale[0],
-                                  scale[1],
-                                  scale[2]],stdout=subprocess.PIPE)
+                                  "--scaling",
+                                  str(scale[0]),
+                                  str(scale[1]),
+                                  str(scale[2])],stdout=subprocess.PIPE)
         stdout,stderr = p.communicate()
         params = stdout.rstrip()
 
