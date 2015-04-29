@@ -52,6 +52,9 @@ class CapsuleGenerator(object):
                 self.mesh_path = mesh_filename
                 self.capsule_path = os.path.splitext(mesh_filename)[0]+'.capsule'
 
+                mesh_exists = os.path.isfile(self.mesh_path)
+                assert mesh_exists
+
                 print("Creating capsule data for link %s\n"%self._link.name)
                 self.__load_or_compute()
             else:
@@ -107,23 +110,17 @@ class CapsuleGenerator(object):
         cylinder = Cylinder(self.radius, self.length)
 
         collision.geometry = cylinder
-        """
-        TODO
-        Notice that here we should change position and orientation as an aggregated of the
-        mesh offset + capsule offset
-
-        In particular: the position is not just position+offset, it must contain also the rotation
-        since the rotation of the original mesh is intended to be around its origin,
-        while in this case we are multiplying that rotation by the rotation of the capsule around
-        its center. We must use Homogeneous transforms!
-        """
-        collision.origin.position[0] += self.p.x()
-        collision.origin.position[1] += self.p.y()
-        collision.origin.position[2] += self.p.z()
 
         mesh_rotation = PyKDL.Rotation().RPY(collision.origin.rotation[0],
                                              collision.origin.rotation[1],
                                              collision.origin.rotation[2],)
+
+        """ we transform the capsule center in parent coordinates """
+        offset = mesh_rotation*self.p
+        collision.origin.position[0] += offset.x()
+        collision.origin.position[1] += offset.y()
+        collision.origin.position[2] += offset.z()
+
         capsule_rotation = mesh_rotation*self.rot
         (R,P,Y) = capsule_rotation.GetRPY()
         collision.origin.rotation[0] = float (R)
@@ -211,7 +208,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(usage='robot_capsule_urdf <options> urdf_file capsule_param\nLoad an URDF file')
     parser.add_argument('urdf_file', type=argparse.FileType('r'), nargs='?',
                         default=None, help='Urdf file. Use - for stdin')
-    parser.add_argument('-o', '--output', help='Dump file to urdf')
+    parser.add_argument('-o', '--output', help='Dump file to urdf', action='store_true')
     args = parser.parse_args()
     # Extract robot name and directory
 
@@ -241,7 +238,7 @@ if __name__ == '__main__':
     robot.links = links
     urdf = robot.to_xml_string()
     if args.output:
-        new_urdf_filename = os.path.splitext(args.urdf_file)[0]+'_capsules.urdf'
+        new_urdf_filename = os.path.splitext(args.urdf_file.name)[0]+'_capsules.urdf'
         file(new_urdf_filename,'w').write(urdf)
     else:
         print(urdf)
