@@ -46,6 +46,7 @@ int main(int argc, char** argv)
     try
     {
       po::store(po::command_line_parser(argc, argv).
+                style(po::command_line_style::unix_style ^ po::command_line_style::allow_short).
                 options(desc).positional(p).run(),
                 vm); // can throw
 
@@ -72,11 +73,7 @@ int main(int argc, char** argv)
 
           for(unsigned int i = 0; i < scaling.size(); ++i)
           {
-              if(scaling[i] < 0.0)
-              {
-                  std::cout << "Error: scaling[" << i << "] is lower than 0" << std::endl;
-                  return 0;
-              } else if(scaling[i] == 0.0)
+              if(scaling[i] == 0.0)
               {
                   std::cout << "Error: scaling[" << i << "] is equal to 0" << std::endl;
                   return 0;
