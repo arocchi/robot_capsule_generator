@@ -1,9 +1,105 @@
+/*
+ * Copyright (C) 2015 Walkman
+ * Author: Alessio Rocchi
+ * email:  alessio.rocchi@iit.it
+ * Permission is granted to copy, distribute, and/or modify this program
+ * under the terms of the GNU Lesser General Public License, version 2 or any
+ * later version published by the Free Software Foundation.
+ *
+ * A copy of the license can be found at
+ * https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+ * Public License for more details
+*/
+
 #include "TriMesh.h"
 #include <roboptim/capsule/util.hh>
 #include <roboptim/capsule/fitter.hh>
+#include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
 
 int main(int argc, char** argv)
 {
+
+    std::string appName = boost::filesystem::basename(argv[0]);
+    std::string mesh_path;
+    std::vector<double> scaling(3,1.0);
+
+    // Define and parse the program options
+    namespace po = boost::program_options;
+    po::positional_options_description p;
+    p.add("mesh_path",
+           1);
+    po::options_description desc("Options");
+    desc.add_options()
+      ("help", "this help message")
+      ("mesh_path",
+       po::value<std::string>(&mesh_path)->required(),
+       "path of mesh file to load")
+      ("scaling",
+       po::value< std::vector<double> >(&scaling)->multitoken());
+
+    po::variables_map vm;
+    try
+    {
+      po::store(po::command_line_parser(argc, argv).
+                options(desc).positional(p).run(),
+                vm); // can throw
+
+      /** --help option
+       */
+      if ( vm.count("help")  )
+      {
+        std::cout << "moveit_compute_default_collision, a command line tool from the moveit setup assistant" << std::endl
+                  << "USAGE: moveit_compute_default_collision --urdf_path [urdf file path] --srdf_path [srdf file path] "
+                  << std::endl << std::endl;
+        std::cout << desc << std::endl;
+
+        return 0;
+      }
+
+      if ( vm.count("scaling")  )
+      {
+          scaling = vm["scaling"].as<std::vector<double> >();
+          if(scaling.size() != 3)
+          {
+              std::cout << "Error: scaling should be a vector of 3 elements" << std::endl;
+              return 0;
+          }
+
+          for(unsigned int i = 0; i < scaling.size(); ++i)
+          {
+              if(scaling[i] < 0.0)
+              {
+                  std::cout << "Error: scaling[" << i << "] is lower than 0" << std::endl;
+                  return 0;
+              } else if(scaling[i] == 0.0)
+              {
+                  std::cout << "Error: scaling[" << i << "] is equal to 0" << std::endl;
+                  return 0;
+              }
+          }
+      }
+
+      if (!vm.count("mesh_path"))
+      {
+
+          std::cout << "Error: a proper mesh math has not been specified" << std::endl;
+          return 0;
+      }
+
+      po::notify(vm); // throws on error, so do after help in case
+                      // there are any problems
+    }
+    catch(po::error& e)
+    {
+      std::cerr << "ERROR: " << e.what() << std::endl << std::endl;
+      std::cerr << desc << std::endl;
+      return 1;
+    }
 
     trimesh::TriMesh *mesh;
     {
@@ -24,9 +120,9 @@ int main(int argc, char** argv)
             value_type halfLength = 0.5;
 
             for (int i = 0; i < vertices_n; i++) {
-                polyhedron.push_back (point_t (mesh->vertices[i][0],
-                                               mesh->vertices[i][1],
-                                               mesh->vertices[i][2]));
+                polyhedron.push_back (point_t (mesh->vertices[i][0]*scaling[0],
+                                               mesh->vertices[i][1]*scaling[1],
+                                               mesh->vertices[i][2]*scaling[2]));
             }
 
             polyhedrons_t polyhedrons;

@@ -19,6 +19,7 @@ endif(CMAKE_BUILD_TYPE STREQUAL "Debug")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/")
 
 FIND_PACKAGE(Eigen3 REQUIRED)
+FIND_PACKAGE(Boost COMPONENTS system filesystem program_options REQUIRED)
 FIND_PACKAGE(urdf REQUIRED)
 FIND_PACKAGE(srdfdom REQUIRED)
 FIND_PACKAGE(moveit_core REQUIRED)
@@ -28,7 +29,9 @@ if(NOT roboptim_capsule_FOUND)
 endif()
 
 # add include directories
-INCLUDE_DIRECTORIES(include ${roboptim_capsule_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR})
+INCLUDE_DIRECTORIES(include ${roboptim_capsule_INCLUDE_DIRS}
+                            ${EIGEN3_INCLUDE_DIR}
+                            ${Boost_INCLUDE_DIRS})
 LINK_DIRECTORIES(${roboptim_capsule_LIBRARY_DIRS})
 
 # Find package qpOASES or build it using ExternalProject
@@ -68,6 +71,7 @@ endif()
 
 # we now add the YARP and iCub libraries to our project.
 TARGET_LINK_LIBRARIES(robot_capsule_generator  PUBLIC  ${roboptim_capsule_LIBRARIES}
+                                                       ${Boost_LIBRARIES}
                                                PRIVATE ${trimesh2_LIBRARIES})
 
 
