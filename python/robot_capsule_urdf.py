@@ -27,85 +27,274 @@ import subprocess
 import os
 
 
-class CapsuleGenerator(object):
-    def __init__(self, link):
+class CapsuleParameters(object):
+    """
+    CapsuleParameters is an object containing parameters for a capsule
+    """
 
-        self.p = PyKDL.Vector(0,0,0)
-        self.radius = 0
-        self.length = 0
-        self.rot = PyKDL.Rotation()
+    def __init__(self,
+                 length=0.0, radius=0.0,
+                 position=PyKDL.Vector(0.0, 0.0, 0.0),
+                 orientation=PyKDL.Rotation()):
+        self.length = length
+        self.p = position
+        self.radius = radius
+        self.rot = orientation
+
+    @staticmethod
+    def from_endpoints(ep1, ep2, radius=0.0):
+        """
+        Generates capsule parameters (center, rotation, radius) starting
+        from endpoinds and radius
+        :param ep1: first end point
+        :param ep2: second endpoint
+        :param radius: capsule radius
+        """
+
+        axis = ep2 - ep1
+        length = axis.Normalize()
+
+        p = .5 * (ep2 + ep1)
+
+        e3 = PyKDL.Vector(0.0,
+                          0.0,
+                          1.0)
+        r = e3 * axis
+        s_theta = r.Normalize()
+        c_theta = PyKDL.dot(e3, axis)
+
+        theta = math.atan2(s_theta, c_theta)
+
+        rot = PyKDL.Rotation().Rot(r, theta)
+
+        assert round(rot[0,2],9) == round(axis[0],9) and \
+               round(rot[1,2],9) == round(axis[1],9) and \
+               round(rot[2,2],9) == round(axis[2],9)
+
+        return CapsuleParameters(length, radius, p, rot)
+
+
+class CapsuleWriter(object):
+    """
+    CapsuleWriter takes care of managing the writing and loading of capsules to file.
+    The files it creates are URDF files with robot name equal to mesh name,
+    and a link for each capsule relative to that mesh.
+    In fact, while there should be a capsule for each mesh, we need to create a capsule for
+    each time the mesh is used in URDF file with different scaling parameters.
+    In fact, a generic rescaling might change the parameters of the optimal capsule
+    """
+
+    def __init__(self, mesh_name):
+        """
+        Creates a CapsuleWriter from a mesh file name
+        :param mesh_name: mesh file path or ROS (package) path
+        :return: True on success
+        """
+        mesh_filename = mesh_name
+        is_package = mesh_filename.find('package://')
+        if is_package != -1:
+            rospack = rospkg.RosPack()
+            package_len = mesh_filename.find('/', 10)
+            package_name = mesh_filename[10:package_len]
+            ros_path = rospack.get_path(package_name)
+            mesh_filename = ros_path + '/' + mesh_filename[package_len + 1:]
+
+        self.mesh_path = mesh_filename
+        self.capsule_path = os.path.splitext(self.mesh_path)[0] + '.capsule'
+
+        self._mesh_exists = os.path.isfile(self.mesh_path)
+        self._capsule_urdf_exists = os.path.isfile(self.capsule_path)
+        assert self._mesh_exists
+        self._robot = None
+
+        if self.is_up_to_date():
+            self._load()
+        else:
+            self._robot = Robot(self.mesh_path)
+
+    def _containts_id(self, scaling_id):
+        """
+        Checks whether the loaded capsule file already contains a capsule loaded
+        from the mesh with the specified scaling
+        :param scaling_id: a string representing a scaling vector for the mesh file
+        :return: True if the capsule URDF contains capsule parameters computed from the mesh
+                 with specified scaling
+        """
+        for link in self._robot.links:
+            if link.name == scaling_id:
+                return True
+        return False
+
+    def _load(self):
+        """
+        Loads the capsule URDF
+        :return: True on success
+        """
+        # making sure the robot name is set to be the mesh name
+        capsule_file = file(self.capsule_path, 'r')
+
+        if type(capsule_file) is file and not capsule_file.closed:
+            self._robot = URDF.from_xml_string(capsule_file.read())
+        else:
+            raise Exception('Error loading capsule file')
+
+        self._robot.name = self.mesh_path
+        return True
+
+    def exists(self, scaling_id):
+        """
+        Checks whether a previously generated capsule file already exists, and it contains specified frame_id
+        :param scaling_id a string representing a mesh scaling id as specified by the function scaling_id
+        :return: true if the capsule file already exists and it contains specified scaling_id
+        """
+        return os.path.isfile(self.capsule_path) and self._containts_id(scaling_id)
+
+    def get_parameters(self, scaling_id):
+        for link in self._robot.links:
+            if link.name == scaling_id:
+                capsule_link = link
+                if capsule_link.collision:
+                    collision = capsule_link.collision
+                    p = PyKDL.Vector(collision.origin.position[0],
+                                     collision.origin.position[1],
+                                     collision.origin.position[2])
+
+                    rot = PyKDL.Rotation.RPY(collision.origin.rotation[0],
+                                             collision.origin.rotation[1],
+                                             collision.origin.rotation[2])
+                    cylinder = collision.geometry
+                    if type(cylinder) is not Cylinder:
+                        raise Exception('error loading capsule from URDF')
+
+                    return CapsuleParameters(cylinder.length, cylinder.radius,
+                                             p, rot)
+        raise Exception('no collision information found on URDF')
+
+    @staticmethod
+    def get_scaling_id(link):
+        """
+        :param link a link containing a collision object
+        :return: a string representing the tuple
+        """
+
+        if type(link) is not Link:
+            raise Exception('link parameters is not of type Link')
+        elif not link.collision:
+            raise Exception('link parameter does not contain collision information')
+        elif not link.collision.geometry:
+            raise Exception('link collision does not have geometry information (i.e. position, orientation, scaling)')
+
+        if link.collision.geometry.scale:
+            scaling = link.collision.geometry.scale
+        else:
+            scaling = (1.0, 1.0, 1.0)
+        return "%.5f_%.5f_%.5f" % (scaling[0],
+                                   scaling[1],
+                                   scaling[2])
+
+    def is_up_to_date(self):
+        """
+        Checks whether the capsule file has been last modified after last update of the mesh
+        :return: true if the capsule file has been last modified after last update of the mesh
+        """
+        return self._capsule_urdf_exists and os.path.getmtime(self.capsule_path) >= os.path.getmtime(self.mesh_path)
+
+    def save(self, collision, scaling_id):
+        """
+        :param collision: the collision object
+        :return: True on success
+        """
+
+        if type(collision) is not Collision:
+            raise Exception('collision is not a Collision object')
+
+        link = Link(name=scaling_id)
+        link.collision = collision
+        self._robot.add_link(link)
+
+        capsule_file = file(self.capsule_path, 'w')
+        capsule_file.write(self._robot.to_xml_string())
+        capsule_file.close()
+
+
+class CapsuleGenerator(CapsuleParameters):
+    """
+    CapsuleGenerator loads or computes optimal capsules and
+    caches the computation in a URDF file by using a CapsuleWriter object
+    """
+
+    def __init__(self, link):
+        super(CapsuleGenerator, self).__init__()
+
+        if type(link) is not Link:
+            raise Exception('link parameters is not of type Link')
+
         self._link = None
         self.mesh_path = ''
         self.capsule_path = ''
+        self.capsule_writer = None
 
         if link.collision:
             self._link = link
             if type(link.collision.geometry) is Mesh:
-                mesh_filename = link.collision.geometry.filename
-                is_package = mesh_filename.find('package://')
-                if is_package != -1:
-                    rospack = rospkg.RosPack()
-                    package_len = mesh_filename.find('/',10)
-                    package_name = mesh_filename[10:package_len]
-                    ros_path = rospack.get_path(package_name)
-                    mesh_filename = ros_path+'/'+mesh_filename[package_len+1:]
-                self.mesh_path = mesh_filename
-                self.capsule_path = os.path.splitext(mesh_filename)[0]+'.capsule'
+                self.capsule_writer = CapsuleWriter(link.collision.geometry.filename)
 
-                mesh_exists = os.path.isfile(self.mesh_path)
-                assert mesh_exists
+                self.mesh_path = self.capsule_writer.mesh_path
+                self.capsule_path = self.capsule_writer.capsule_path
 
-                print("Creating capsule data for link %s\n"%self._link.name)
-                self.__load_or_compute()
+                print("Creating capsule data for link %s\n" % self._link.name)
+                self._load_or_compute()
             else:
                 raise Exception('Specified link\'s collision object is not a mesh')
 
         else:
             raise Exception('Specified link does not have a collision object')
 
-    def __load_or_compute(self):
-        capsule_exists = os.path.isfile(self.capsule_path)
-        capsule_is_updated = False
-        if capsule_exists:
-            capsule_is_updated = os.path.getmtime(self.capsule_path) >= os.path.getmtime(self.mesh_path)
+    def _load_or_compute(self):
+        """
+        Loads capsule parameters from URDF (through CapsuleWriter) or computes them
+        by calling roboptim-capsule
+        :return: True on success
+        """
+        scaling_id = CapsuleWriter.get_scaling_id(self._link)
+        capsule_exists = self.capsule_writer.exists(scaling_id)
+        capsule_is_updated = self.capsule_writer.is_up_to_date()
         if capsule_exists and capsule_is_updated:
-            print("Loading capsule from capsule file %s\n"%self.capsule_path)
-            self.load()
+            print("Loading capsule from capsule file %s\n" % self.capsule_path)
+            self._load()
         else:
-            print("Computing capsule from mesh file %s\n"%self.mesh_path)
-            self.compute()
-            self.save()
+            print("Computing capsule from mesh file %s\n" % self.mesh_path)
+            self._compute()
+            self._save()
+        return True
 
-    def compute(self):
-        self.__params_to_cylinder(self.__compute_params())
+    def _compute(self):
+        """
+        Computes capsule information by using roboptim-capsule and then converts them to CapsuleParameters
+        :return: True on success
+        """
+        self._params_to_cylinder(self._compute_params())
+        return True
 
-    def load(self):
-        capsule_file = file(self.capsule_path,'r')
+    def _load(self):
+        """
+        Loads a CapsuleParameters object through a CapsuleWriter and assigns the parameters to this CapsuleGenerator
+        :return: True on success
+        """
+        scaling_id = CapsuleWriter.get_scaling_id(self._link)
+        capsule_params = self.capsule_writer.get_parameters(scaling_id)
+        self.length = capsule_params.length
+        self.p = capsule_params.p
+        self.radius = capsule_params.radius
+        self.rot = capsule_params.rot
 
-        if type(capsule_file) is file and not capsule_file.closed:
-            capsule_urdf = URDF.from_xml_string(capsule_file.read())
-            capsule_link = capsule_urdf.links[0]
-            if capsule_link.collision:
-                collision = capsule_link.collision
-                self.p = PyKDL.Vector(collision.origin.position[0],
-                                      collision.origin.position[1],
-                                      collision.origin.position[2])
+        return True
 
-                cylinder = collision.geometry
-                self.radius = cylinder.radius
-                self.length = cylinder.length
-                if type(cylinder) is not Cylinder:
-                    raise Exception('error loading capsule from urdf')
-                self.rot = PyKDL.Rotation.RPY(collision.origin.rotation[0],
-                                              collision.origin.rotation[1],
-                                              collision.origin.rotation[2])
-
-            else:
-                raise Exception('no collision information found on urdf')
-
-    def save(self):
-        robot = Robot(self._link.name)
-        link = Link(name=self._link.name)
+    def _save(self):
+        """
+        Saves the parameters to a file through a CapsuleWriter
+        :return: True on success
+        """
         collision = Collision(origin=self._link.collision.origin)
         cylinder = Cylinder(self.radius, self.length)
 
@@ -113,28 +302,29 @@ class CapsuleGenerator(object):
 
         mesh_rotation = PyKDL.Rotation().RPY(collision.origin.rotation[0],
                                              collision.origin.rotation[1],
-                                             collision.origin.rotation[2],)
+                                             collision.origin.rotation[2], )
 
         """ we transform the capsule center in parent coordinates """
-        offset = mesh_rotation*self.p
+        offset = mesh_rotation * self.p
         collision.origin.position[0] += offset.x()
         collision.origin.position[1] += offset.y()
         collision.origin.position[2] += offset.z()
 
-        capsule_rotation = mesh_rotation*self.rot
-        (R,P,Y) = capsule_rotation.GetRPY()
-        collision.origin.rotation[0] = float (R)
-        collision.origin.rotation[1] = float (P)
-        collision.origin.rotation[2] = float (Y)
-        link.collision = collision
+        capsule_rotation = mesh_rotation * self.rot
+        (R, P, Y) = capsule_rotation.GetRPY()
+        collision.origin.rotation[0] = float(R)
+        collision.origin.rotation[1] = float(P)
+        collision.origin.rotation[2] = float(Y)
 
-        robot.add_link(link)
+        self.capsule_writer.save(collision, CapsuleWriter.get_scaling_id(self._link))
+        return True
 
-        capsule_file = file(self.capsule_path,'w')
-        capsule_file.write(robot.to_xml_string())
-        capsule_file.close()
-
-    def __compute_params(self):
+    def _compute_params(self):
+        """
+        Computes optimal capsule parameters by calling robot_capsule_generator, which in turns uses roboptim-capsule
+        :return: a tuple of size 7, where the numbers are strings representing
+                 respectively the position of the two endpoint and the radius of the capsule
+        """
         if self._link.collision.geometry.scale:
             scale = self._link.collision.geometry.scale
             p = subprocess.Popen(["robot_capsule_generator",
@@ -142,18 +332,22 @@ class CapsuleGenerator(object):
                                   "--scaling",
                                   str(scale[0]),
                                   str(scale[1]),
-                                  str(scale[2])],stdout=subprocess.PIPE)
+                                  str(scale[2])], stdout=subprocess.PIPE)
         else:
-            p = subprocess.Popen(["robot_capsule_generator",self.mesh_path], stdout=subprocess.PIPE)
-            
-        stdout,stderr = p.communicate()
+            p = subprocess.Popen(["robot_capsule_generator", self.mesh_path], stdout=subprocess.PIPE)
+
+        stdout, stderr = p.communicate()
         params = stdout.rstrip()
 
         cylinder_para = params.split('\n')
         cylinder_para = cylinder_para[1:]
         return cylinder_para
 
-    def __params_to_cylinder(self, cylinder_params):
+    def _params_to_cylinder(self, cylinder_params):
+        """
+        Transforms capsule parameters as computed by robot_capsule_generator to CapsuleParams
+        return True on success
+        """
         ep1 = PyKDL.Vector(float(cylinder_params[0]),
                            float(cylinder_params[1]),
                            float(cylinder_params[2]))
@@ -162,31 +356,22 @@ class CapsuleGenerator(object):
                            float(cylinder_params[5]))
 
         self.radius = float(cylinder_params[6])
-        self.length = (ep2-ep1).Norm()
 
-        self.p = .5*(ep2+ep1)
-
-        e3 = PyKDL.Vector(0,
-                          0,
-                          1)
-        r = e3*self.p
-        s_theta = r.Normalize()
-        c_theta = PyKDL.dot(e3,self.p)
-
-        theta = math.atan2(s_theta,c_theta)
-
-        self.rot = PyKDL.Rotation().Rot(r,theta)
-
+        capsule_params = CapsuleParameters.from_endpoints(ep1, ep2, self.radius)
+        self.length = capsule_params.length
+        self.p = capsule_params.p
+        self.rot = capsule_params.rot
+        return True
 
 
 if __name__ == '__main__':
     """
-    robot_capsule_urdf is a python script that will parse a robot urdf containing
-    mesh collision information, and generate an urdf just with collision data where
+    robot_capsule_urdf is a python script that will parse a robot URDF containing
+    mesh collision information, and generate an URDF just with collision data where
     links are instead approximated with capsules.
-    The capsule is then converted into a cylinder in the urdf, where the position
+    The capsule is then converted into a cylinder in the URDF, where the position
     of the cylinder will be the mean of the two endpoints plus the original mesh
-    offset, and the orientation will be computed by multiplyng the original mesh
+    offset, and the orientation will be computed by multiplying the original mesh
     rotation matrix with the rotation obtained from the two endpoints ep2 and ep1
     by computing the cross product between e3 and v (in order to align the local
     z axis of the capsule frame to the actual segment connecting the endpoints)
@@ -208,13 +393,14 @@ if __name__ == '__main__':
     """
     parser = argparse.ArgumentParser(usage='robot_capsule_urdf <options> urdf_file capsule_param\nLoad an URDF file')
     parser.add_argument('urdf_file', type=argparse.FileType('r'), nargs='?',
-                        default=None, help='Urdf file. Use - for stdin')
-    parser.add_argument('-o', '--output', help='Dump file to urdf', action='store_true')
+                        default=None, help='URDF file. Use - for stdin')
+    parser.add_argument('-o', '--output', help='Dump file to URDF', action='store_true')
     args = parser.parse_args()
     # Extract robot name and directory
 
     if args.urdf_file is None:
         print("Error! no urdf_file provided")
+        exit()
     else:
         robot = URDF.from_xml_string(args.urdf_file.read())
     print
@@ -225,13 +411,13 @@ if __name__ == '__main__':
             if type(link.collision.geometry) is Mesh:
                 c = CapsuleGenerator(link)
 
-                cylinder = Cylinder (c.radius, c.length)
+                cylinder = Cylinder(c.radius, c.length)
 
                 link.collision.geometry = cylinder
                 link.collision.origin.position[0] = c.p.x()
                 link.collision.origin.position[1] = c.p.y()
                 link.collision.origin.position[2] = c.p.z()
-                (R,P,Y) = c.rot.GetRPY()
+                (R, P, Y) = c.rot.GetRPY()
                 link.collision.origin.rotation[0] = R
                 link.collision.origin.rotation[1] = P
                 link.collision.origin.rotation[2] = Y
@@ -239,7 +425,7 @@ if __name__ == '__main__':
     robot.links = links
     urdf = robot.to_xml_string()
     if args.output:
-        new_urdf_filename = os.path.splitext(args.urdf_file.name)[0]+'_capsules.urdf'
-        file(new_urdf_filename,'w').write(urdf)
+        new_urdf_filename = os.path.splitext(args.urdf_file.name)[0] + '_capsules.urdf'
+        file(new_urdf_filename, 'w').write(urdf)
     else:
         print(urdf)
