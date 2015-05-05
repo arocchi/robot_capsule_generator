@@ -82,6 +82,9 @@ install(TARGETS robot_capsule_generator
    RUNTIME DESTINATION bin
 )
 
+INSTALL(PROGRAMS python/robot_capsule_urdf 
+        DESTINATION bin)
+
 
 #add_subdirectory(doc)
 
