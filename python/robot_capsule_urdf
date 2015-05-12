@@ -377,19 +377,21 @@ if __name__ == '__main__':
     z axis of the capsule frame to the actual segment connecting the endpoints)
 
     e3 = [0,0,1]
-    v=.5*(ep2+ep1)
+    v=(ep2-ep1)
+    v.Normalize()
     a=e3 x v
 
     normalizing it in a_norm, computing
 
-    s_theta = a.norm()
+    s_theta = a.Norm()
+    a.Normalize()
     c_theta= dot(e1,a)
 
     Finally we will be able to obtain a rotation matrix from an axis angle rotation
     representation where the angle theta and the axis r will be
 
     theta = atan2(s_theta,c_theta)
-    r = a_norm
+    r = a
     """
     parser = argparse.ArgumentParser(usage='robot_capsule_urdf <options> urdf_file capsule_param\nLoad an URDF file')
     parser.add_argument('urdf_file', type=argparse.FileType('r'), nargs='?',
