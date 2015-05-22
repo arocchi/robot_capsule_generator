@@ -1,0 +1,87 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2015 the Walkman Consortium
+#
+# Authors: Alessio Rocchi
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import argparse
+
+from lxml import etree
+from xml.dom import minidom
+import PyKDL as kdl
+import copy
+import os
+
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(usage='robot_capsule_urdf_to_rviz <options> urdf_file\nLoad an URDF file using cylinders instead of capsules')
+    parser.add_argument('urdf_file', type=argparse.FileType('r'), nargs='?',
+                        default=None, help='URDF file. Use - for stdin')
+    parser.add_argument('-o', '--output', help='Dump file with cylinder+spheres at endpoints to URDF in .rviz extension', action='store_true')
+    args = parser.parse_args()
+    # Extract robot name and directory
+
+    if args.urdf_file is None:
+        print("Error! no urdf_file provided")
+        exit()
+    else:
+        rviz_file = os.path.splitext(args.urdf_file.name)[0]+'.rviz'
+        rviz_urdf = etree.fromstring(args.urdf_file.read())
+
+        toappend = []
+        for collision_el in rviz_urdf.iter('collision'):
+            for cylinder_el in collision_el.iter('cylinder'):
+                origin_xyz = []
+                origin_rpy = []
+                for o in collision_el.iter('origin'):
+                    origin_xyz = [float(x) for x in o.get('xyz').split()]
+                    origin_rpy = [float(x) for x in o.get('rpy').split()]
+
+                length = float(cylinder_el.get('length'))
+                rot = kdl.Rotation.RPY(origin_rpy[0], origin_rpy[1], origin_rpy[2])
+                ep1 = kdl.Vector(origin_xyz[0], origin_xyz[1], origin_xyz[2]) - .5*length*rot.UnitZ()
+                ep2 = ep1 + length*rot.UnitZ()
+
+                collision_ep1 = copy.deepcopy(collision_el)
+                for o in collision_ep1.iter('origin'):
+                    o.set('xyz',"%f %f %f"%(ep1[0],ep1[1],ep1[2]))
+                for i in collision_ep1.iter('cylinder'):
+                    i.tag = 'sphere'
+                    i_as_dict = i.attrib
+                    del i_as_dict['length']
+
+                collision_ep2 = copy.deepcopy(collision_ep1)
+                for o in collision_ep2.iter('origin'):
+                    o.set('xyz',"%f %f %f"%(ep2[0],ep2[1],ep2[2]))
+
+                link_el = collision_el.getparent()
+                toappend.append({'link': link_el,
+                                 'ep1': collision_ep1,
+                                 'ep2': collision_ep2})
+
+        for el in toappend:
+            el['link'].append(el['ep1'])
+            el['link'].append(el['ep2'])
+
+    urdf = etree.tostring(rviz_urdf)
+    pretty_print = lambda data: '\n'.join([line for line in minidom.parseString(urdf).toprettyxml(indent=' '*2).split('\n') if line.strip()])
+    urdf = pretty_print(urdf)
+    if args.output:
+        file(rviz_file, 'w').write(urdf)
+    else:
+        print(urdf)

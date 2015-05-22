@@ -40,6 +40,8 @@ class CapsuleParameters(object):
         self.p = position
         self.radius = radius
         self.rot = orientation
+        self.ep1 = self.p - 0.5*self.length*self.rot.UnitZ()
+        self.ep2 = self.p + 0.5*self.length*self.rot.UnitZ()
 
     @staticmethod
     def from_endpoints(ep1, ep2, radius=0.0):
@@ -201,7 +203,9 @@ class CapsuleWriter(object):
 
     def save(self, collision, scaling_id):
         """
+        Saves a collision object (in this case, a capsule) to file (capsule URDF)
         :param collision: the collision object
+        :param scalind_id: scaling id from get_scaling_id(link)
         :return: True on success
         """
 
