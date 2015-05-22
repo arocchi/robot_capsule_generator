@@ -82,7 +82,7 @@ install(TARGETS robot_capsule_generator
    RUNTIME DESTINATION bin
 )
 
-INSTALL(PROGRAMS python/robot_capsule_urdf 
+INSTALL(PROGRAMS python/robot_capsule_urdf python/robot_capsule_urdf_to_rviz 
         DESTINATION bin)
 
 
